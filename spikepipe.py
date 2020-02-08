@@ -26,6 +26,15 @@ saturation = 50000.
 mag_kwd = 'rMeanPSFMag'
 make_diagnostic_plot = True
 
+catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0')])
+catalog_coords = SkyCoord(catalog['raMean'], catalog['decMean'], unit=u.deg)
+apertures = SkyCircularAperture(catalog_coords, aperture_radius)
+target = catalog_coords.separation(target_coords).arcsec < 1.
+if target.sum() == 0:
+    logging.warning('target not in the catalog')
+elif target.sum() > 1:
+    logging.warning('catalog has multiple sources within 1" of the target')
+
 
 def update_wcs(wcs, p):
     wcs.wcs.crval += p[:2]
@@ -72,23 +81,14 @@ def read_and_refine_wcs(filepath, show=False):
         imshow_norm(ccddata.data, interval=ZScaleInterval())
         x, y = ccddata.wcs.all_world2pix(radec, 0).T
         plt.plot(x, y, ls='none', marker='o', mec='r', mfc='none')
-        plt.savefig(os.path.join(image_dir, filename[:-8] + '.pdf'))
+        plt.savefig(os.path.join(image_dir, os.path.basename(filepath)[:-8] + '.pdf'), overwrite=True)
+        plt.savefig('latest_image.pdf', overwrite=True)
         plt.close()
 
     return ccddata
 
 
-catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0')])
-catalog_coords = SkyCoord(catalog['raMean'], catalog['decMean'], unit=u.deg)
-apertures = SkyCircularAperture(catalog_coords, aperture_radius)
-target = catalog_coords.separation(target_coords).arcsec < 1.
-if target.sum() == 0:
-    logging.warning('target not in the catalog')
-elif target.sum() > 1:
-    logging.warning('catalog has multiple sources within 1" of the target')
-
-for filename in os.listdir(data_dir):
-    filepath = os.path.join(data_dir, filename)
+def reduce_one_image(filepath):
     ccddata = read_and_refine_wcs(filepath, show=make_diagnostic_plot)
     background = Background2D(ccddata, bkg_box_size)
     ccddata.mask |= ccddata.data > saturation
@@ -122,12 +122,22 @@ for filename in os.listdir(data_dir):
         ax.set_xlabel('Instrumental Magnitude')
         ax.set_ylabel('AB Magnitude')
         ax.legend()
-        image_path = os.path.join(image_dir, filename[:-8] + '_cal.pdf')
+        image_path = os.path.join(image_dir, os.path.basename(filepath)[:-8] + '_cal.pdf')
         plt.savefig(image_path, overwrite=True)
+        plt.savefig('latest_cal.pdf', overwrite=True)
         plt.close()
 
-t = Table.read('lc.txt', format='ascii')
-plt.errorbar(t['MJD'], t['mag'], t['dmag'], marker='.', ls='none')
-plt.xlabel('MJD')
-plt.ylabel('Magnitude')
-plt.savefig('lc.pdf')
+
+def update_light_curve():
+    t = Table.read('lc.txt', format='ascii')
+    plt.errorbar(t['MJD'], t['mag'], t['dmag'], marker='.', ls='none')
+    plt.xlabel('MJD')
+    plt.ylabel('Magnitude')
+    plt.savefig('lc.pdf', overwrite=True)
+
+
+if __name__ == '__main__':
+    for filename in os.listdir(data_dir):
+        filepath = os.path.join(data_dir, filename)
+        reduce_one_image(filename)
+    update_light_curve()

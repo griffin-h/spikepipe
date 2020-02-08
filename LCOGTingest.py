@@ -50,14 +50,10 @@ def download_frame(frame, dest='.', force=False):
         with open(filename, 'wb') as f:
             f.write(requests.get(frame['url']).content)
     else:
-        matches_filenames = [os.path.basename(fullpath) for fullpath in matches]
-        if filename not in matches_filenames:
-            filename = matches_filenames[0]
         logging.info('{} already exists'.format(filename))
 
     if os.path.isfile(filename) and os.stat(filename).st_size == 0:
         logging.warning('{} has size 0. Redownloading.'.format(filename))
-        filename = frame['filename']
         with open(filename, 'wb') as f:
             f.write(requests.get(frame['url']).content)
 
