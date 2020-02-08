@@ -1,1 +1,7 @@
 .idea/
+catalogs/
+data/
+__pycache__/
+plots/
+lc.pdf
+lc.txt
