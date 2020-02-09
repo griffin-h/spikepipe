@@ -130,10 +130,13 @@ def reduce_one_image(filepath):
 
 def update_light_curve():
     t = Table.read('lc.txt', format='ascii')
-    plt.errorbar(t['MJD'], t['mag'], t['dmag'], marker='.', ls='none')
-    plt.xlabel('MJD')
-    plt.ylabel('Magnitude')
+    ax = plt.axes()
+    ax.errorbar(t['MJD'], t['mag'], t['dmag'], marker='.', ls='none')
+    ax.set_xlabel('MJD')
+    ax.set_ylabel('Magnitude')
+    ax.invert_yaxis()
     plt.savefig('lc.pdf', overwrite=True)
+    plt.close()
 
 
 if __name__ == '__main__':
