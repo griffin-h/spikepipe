@@ -19,21 +19,27 @@ catalog_path = 'catalogs/spikey_catalog.csv'
 data_dir = 'data'
 image_dir = 'plots'
 lc_file = 'lc.txt'
+plot_colors = {'rp': 'r', 'V': 'g'}
+plot_markers = {'1m0-06': 'h', '1m0-08': '8', '2.4m Hiltner': 's'}
 
 aperture_radius = 2. * u.arcsec
 bkg_box_size = 1024
 saturation = 50000.
-mag_kwd = 'rMeanPSFMag'
 make_diagnostic_plot = True
 
-catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0')])
-catalog_coords = SkyCoord(catalog['raMean'], catalog['decMean'], unit=u.deg)
-apertures = SkyCircularAperture(catalog_coords, aperture_radius)
+catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0'), ('', '0')])
+ras = catalog['raMean'] if 'raMean' in catalog.colnames else catalog['RAJ2000']
+decs = catalog['decMean'] if 'decMean' in catalog.colnames else catalog['DEJ2000']
+catalog_coords = SkyCoord(ras, decs, unit=u.deg)
 target = catalog_coords.separation(target_coords).arcsec < 1.
 if target.sum() == 0:
-    logging.warning('target not in the catalog')
+    ras = np.append(catalog_coords.ra, target_coords.ra)
+    decs = np.append(catalog_coords.dec, target_coords.dec)
+    catalog_coords = SkyCoord(ras, decs)
+    target = np.append(target, True)
 elif target.sum() > 1:
     logging.warning('catalog has multiple sources within 1" of the target')
+apertures = SkyCircularAperture(catalog_coords, aperture_radius)
 
 
 def update_wcs(wcs, p):
@@ -74,7 +80,7 @@ def read_and_refine_wcs(filepath, show=False):
     i_peak = np.argmax(n_hist)
     match = (sep.arcsec > bins[i_peak]) & (sep.arcsec < bins[i_peak + 1])
     xy = np.array([sources['x'][match], sources['y'][match]]).T
-    radec = np.array([catalog[i[match]]['raMean'], catalog[i[match]]['decMean']]).T
+    radec = np.array([catalog_coords.ra.deg[i[match]], catalog_coords.dec.deg[i[match]]]).T
     refine_wcs(ccddata.wcs, xy, radec)
 
     if show:
@@ -88,8 +94,12 @@ def read_and_refine_wcs(filepath, show=False):
     return ccddata
 
 
-def reduce_one_image(filepath):
-    ccddata = read_and_refine_wcs(filepath, show=make_diagnostic_plot)
+def reduce_one_image(ccddata, image_path=None):
+    mjd = ccddata.meta['MJD-OBS'] if 'MJD-OBS' in ccddata.meta else ccddata.meta['MJD']
+    filt = ccddata.meta['FILTER'] if 'FILTER' in ccddata.meta else ccddata.meta['FILTID2']
+    telescope = ccddata.meta['TELESCOP']
+    mag_kwd = 'rMeanPSFMag' if 'rMeanPSFMag' in catalog.colnames else filt.replace('p', '_') + 'mag'
+
     background = Background2D(ccddata, bkg_box_size)
     ccddata.mask |= ccddata.data > saturation
     ccddata.uncertainty = ccddata.data ** 0.5
@@ -109,20 +119,20 @@ def reduce_one_image(filepath):
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
-        f.write(f'{ccddata.meta["MJD-OBS"]:.5f} {mag:.2f} {dmag:.2f} {zp:.2f} {zperr:.2f}\n')
+        f.write(f'{mjd:.5f} {mag:.3f} {dmag:.3f} {zp:.3f} {zperr:.3f} {filt:>6s} {telescope:>12s}\n')
 
-    if make_diagnostic_plot:
+    if image_path is not None:
         ax = plt.axes()
-        ax.plot(photometry['aperture_mag'], photometry[mag_kwd], ls='none', marker=',', zorder=1,
+        mark = ',' if np.isfinite(photometry['aperture_mag']).sum() > 1000 else '.'
+        ax.plot(photometry['aperture_mag'], photometry[mag_kwd], ls='none', marker=mark, zorder=1,
                 label='calibration stars')
         ax.plot(mag - zp, mag, ls='none', marker='*', zorder=3, label='target')
-        yfit = np.array([21., 16.])
+        yfit = np.array([21., 13.])
         xfit = yfit - zp
         ax.plot(xfit, yfit, label=f'$Z = {zp:.2f}$ mag', zorder=2)
         ax.set_xlabel('Instrumental Magnitude')
         ax.set_ylabel('AB Magnitude')
         ax.legend()
-        image_path = os.path.join(image_dir, os.path.basename(filepath)[:-8] + '_cal.pdf')
         plt.savefig(image_path, overwrite=True)
         plt.savefig('latest_cal.pdf', overwrite=True)
         plt.close()
@@ -130,11 +140,15 @@ def reduce_one_image(filepath):
 
 def update_light_curve():
     t = Table.read('lc.txt', format='ascii')
+    grouped = t.group_by(['filter', 'telescope'])
     ax = plt.axes()
-    ax.errorbar(t['MJD'], t['mag'], t['dmag'], marker='.', ls='none')
+    for f in grouped.groups:
+        ax.errorbar(f['MJD'], f['mag'], f['dmag'], ls='none', label=f['telescope'][0] + ' ' + f['filter'][0],
+                    color=plot_colors.get(f['filter'][0]), marker=plot_markers.get(f['telescope'][0]))
     ax.set_xlabel('MJD')
     ax.set_ylabel('Magnitude')
     ax.invert_yaxis()
+    ax.legend(loc='best')
     plt.savefig('lc.pdf', overwrite=True)
     plt.close()
 
@@ -142,5 +156,11 @@ def update_light_curve():
 if __name__ == '__main__':
     for filename in os.listdir(data_dir):
         filepath = os.path.join(data_dir, filename)
-        reduce_one_image(filename)
+        image_path = os.path.join(image_dir, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
+        if 'elp' in filename:
+            ccddata = read_and_refine_wcs(filepath, show=make_diagnostic_plot)
+        else:
+            ccddata = CCDData.read(filepath, unit='adu')
+            ccddata.mask = np.zeros_like(ccddata.data, bool)
+        reduce_one_image(ccddata, image_path=image_path)
     update_light_curve()
