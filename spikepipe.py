@@ -15,31 +15,29 @@ import logging
 logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
 
 target_coords = SkyCoord('19:18:45.580 +49:37:56.03', unit=(u.hourangle, u.deg))
-catalog_path = 'catalogs/spikey_catalog.csv'
+ps1_catalog_path = 'catalogs/spikey_catalog.csv'
+apass_catalog_path = 'catalogs/spikey_apass_catalog.csv'
 data_dir = 'data'
 image_dir = 'plots'
 lc_file = 'lc.txt'
 plot_colors = {'rp': 'r', 'V': 'g'}
 plot_markers = {'1m0-06': 'h', '1m0-08': '8', '2.4m Hiltner': 's'}
 
-aperture_radius = 2. * u.arcsec
-bkg_box_size = 1024
-saturation = 50000.
-make_diagnostic_plot = True
 
-catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0'), ('', '0')])
-ras = catalog['raMean'] if 'raMean' in catalog.colnames else catalog['RAJ2000']
-decs = catalog['decMean'] if 'decMean' in catalog.colnames else catalog['DEJ2000']
-catalog_coords = SkyCoord(ras, decs, unit=u.deg)
-target = catalog_coords.separation(target_coords).arcsec < 1.
-if target.sum() == 0:
-    ras = np.append(catalog_coords.ra, target_coords.ra)
-    decs = np.append(catalog_coords.dec, target_coords.dec)
-    catalog_coords = SkyCoord(ras, decs)
-    target = np.append(target, True)
-elif target.sum() > 1:
-    logging.warning('catalog has multiple sources within 1" of the target')
-apertures = SkyCircularAperture(catalog_coords, aperture_radius)
+def load_catalog(catalog_path):
+    catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0'), ('', '0')])
+    ras = catalog['raMean'] if 'raMean' in catalog.colnames else catalog['RAJ2000']
+    decs = catalog['decMean'] if 'decMean' in catalog.colnames else catalog['DEJ2000']
+    catalog_coords = SkyCoord(ras, decs, unit=u.deg)
+    target = catalog_coords.separation(target_coords).arcsec < 1.
+    if target.sum() == 0:
+        ras = np.append(catalog_coords.ra, target_coords.ra)
+        decs = np.append(catalog_coords.dec, target_coords.dec)
+        catalog_coords = SkyCoord(ras, decs)
+        target = np.append(target, True)
+    elif target.sum() > 1:
+        logging.warning('catalog has multiple sources within 1" of the target')
+    return catalog, catalog_coords, target
 
 
 def update_wcs(wcs, p):
@@ -69,7 +67,7 @@ def refine_wcs(wcs, xy, radec):
     update_wcs(wcs, res.x)
 
 
-def read_and_refine_wcs(filepath, show=False):
+def read_and_refine_wcs(filepath, catalog_coords, show=True):
     ccddata = CCDData.read(filepath, unit='adu', hdu='SCI')
     sources = fits.getdata(filepath, extname='CAT')
     ccddata.mask = fits.getdata(filepath, extname='BPM')
@@ -94,22 +92,19 @@ def read_and_refine_wcs(filepath, show=False):
     return ccddata
 
 
-def reduce_one_image(ccddata, image_path=None):
-    mjd = ccddata.meta['MJD-OBS'] if 'MJD-OBS' in ccddata.meta else ccddata.meta['MJD']
-    filt = ccddata.meta['FILTER'] if 'FILTER' in ccddata.meta else ccddata.meta['FILTID2']
-    telescope = ccddata.meta['TELESCOP']
-    mag_kwd = 'rMeanPSFMag' if 'rMeanPSFMag' in catalog.colnames else filt.replace('p', '_') + 'mag'
-
+def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None, bkg_box_size=1024, saturation=50000.,
+                       aperture_radius=2.*u.arcsec):
     background = Background2D(ccddata, bkg_box_size)
     ccddata.mask |= ccddata.data > saturation
     ccddata.uncertainty = ccddata.data ** 0.5
     ccddata.data -= background.background
 
+    apertures = SkyCircularAperture(catalog_coords, aperture_radius)
     photometry = aperture_photometry(ccddata, apertures)
     photometry['aperture_mag'] = u.Magnitude(photometry['aperture_sum'] / ccddata.meta['exptime'])
     photometry['aperture_mag_err'] = 2.5 / np.log(10.) * photometry['aperture_sum_err'] / photometry['aperture_sum']
     photometry = hstack([catalog, photometry])
-    photometry['zeropoint'] = photometry[mag_kwd] - photometry['aperture_mag'].value
+    photometry['zeropoint'] = photometry['catalog_mag'] - photometry['aperture_mag'].value
     zeropoints = photometry['zeropoint'][~target]
     if photometry.masked:
         zeropoints = zeropoints.filled(np.nan)
@@ -119,12 +114,13 @@ def reduce_one_image(ccddata, image_path=None):
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
-        f.write(f'{mjd:.5f} {mag:.3f} {dmag:.3f} {zp:.3f} {zperr:.3f} {filt:>6s} {telescope:>12s}\n')
+        f.write(f'{ccddata.meta["MJD-OBS"]:.5f} {mag:.3f} {dmag:.3f} {zp:.3f} {zperr:.3f} {ccddata.meta["FILTER"]:>6s} '
+                f'{ccddata.meta["TELESCOP"]:>12s}\n')
 
     if image_path is not None:
         ax = plt.axes()
         mark = ',' if np.isfinite(photometry['aperture_mag']).sum() > 1000 else '.'
-        ax.plot(photometry['aperture_mag'], photometry[mag_kwd], ls='none', marker=mark, zorder=1,
+        ax.plot(photometry['aperture_mag'], photometry['catalog_mag'], ls='none', marker=mark, zorder=1,
                 label='calibration stars')
         ax.plot(mag - zp, mag, ls='none', marker='*', zorder=3, label='target')
         yfit = np.array([21., 13.])
@@ -154,13 +150,29 @@ def update_light_curve():
 
 
 if __name__ == '__main__':
+    catalog0, catalog_coords0, target0 = load_catalog(ps1_catalog_path)
+
     for filename in os.listdir(data_dir):
         filepath = os.path.join(data_dir, filename)
         image_path = os.path.join(image_dir, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
-        if 'elp' in filename:
-            ccddata = read_and_refine_wcs(filepath, show=make_diagnostic_plot)
-        else:
+
+        if 'elp' in filename:  # Las Cumbres image
+            ccddata = read_and_refine_wcs(filepath, catalog_coords0)
+        else:  # MDM image
             ccddata = CCDData.read(filepath, unit='adu')
             ccddata.mask = np.zeros_like(ccddata.data, bool)
-        reduce_one_image(ccddata, image_path=image_path)
+            ccddata.meta['MJD-OBS'] = ccddata.meta['MJD']
+            ccddata.meta['FILTER'] = ccddata.meta['FILTID2']
+
+        if ccddata.meta['FILTER'][0] in 'grizy':  # use Pan-STARRS catalog
+            catalog, catalog_coords, target = catalog0.copy(), catalog_coords0, target0
+            catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'][0] + 'MeanPSFMag']
+        elif ccddata.meta['FILTER'][0] in 'BV':  # use APASS catalog
+            catalog, catalog_coords, target = load_catalog(apass_catalog_path)
+            catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'].replace('p', '_') + 'mag']
+        else:
+            raise ValueError('no catalog for filter ' + ccddata.meta['FILTER'])
+
+        extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
+
     update_light_curve()
