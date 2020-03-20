@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 
 catalog, catalog_coords, target = load_catalog(ps1_catalog_path)
-today = '2020-03-18'#datetime.utcnow().strftime('%Y-%m-%d')
+today = datetime.utcnow().strftime('%Y-%m-%d')
 frames = get_metadata(start=today, OBSTYPE='EXPOSE', RLEVEL=91, PROPID='DDT2020A-006')
 for frame in frames:
     filename = download_frame(frame, 'data/')
