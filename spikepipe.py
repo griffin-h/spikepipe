@@ -9,7 +9,7 @@ from scipy.optimize import minimize
 import astropy.units as u
 import matplotlib.pyplot as plt
 import numpy as np
-from photutils import Background2D, SkyCircularAperture, aperture_photometry
+from photutils import Background2D, SkyCircularAperture, SkyCircularAnnulus, aperture_photometry
 import os
 import logging
 
@@ -94,11 +94,20 @@ def read_and_refine_wcs(filepath, catalog_coords, show=True):
     return ccddata
 
 
-def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None, aperture_radius=2.*u.arcsec):
+def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None, aperture_radius=2.*u.arcsec,
+                       bg_radius_in=None, bg_radius_out=None):
     apertures = SkyCircularAperture(catalog_coords, aperture_radius)
+    if bg_radius_in is not None and bg_radius_out is not None:
+        apertures = [apertures, SkyCircularAnnulus(catalog_coords, bg_radius_in, bg_radius_out)]
     photometry = aperture_photometry(ccddata, apertures)
-    photometry['aperture_mag'] = u.Magnitude(photometry['aperture_sum'] / ccddata.meta['exptime'])
-    photometry['aperture_mag_err'] = 2.5 / np.log(10.) * photometry['aperture_sum_err'] / photometry['aperture_sum']
+    if 'aperture_sum_1' in photometry.colnames:
+        flux = photometry['aperture_sum_0'] - photometry['aperture_sum_1']
+        dflux = (photometry['aperture_sum_err_0'] ** 2. + photometry['aperture_sum_err_1'] ** 2.) ** 0.5
+    else:
+        flux = photometry['aperture_sum']
+        dflux = photometry['aperture_sum_err']
+    photometry['aperture_mag'] = u.Magnitude(flux / ccddata.meta['exptime'])
+    photometry['aperture_mag_err'] = 2.5 / np.log(10.) * dflux / flux
     photometry = hstack([catalog, photometry])
     photometry['zeropoint'] = photometry['catalog_mag'] - photometry['aperture_mag'].value
     zeropoints = photometry['zeropoint'][~target]
