@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, hstack
 from astropy.nddata import CCDData
@@ -21,7 +22,8 @@ data_dir = 'data'
 image_dir = 'plots'
 lc_file = 'lc.txt'
 plot_colors = {'rp': 'r', 'V': 'g'}
-plot_markers = {'1m0-06': 'h', '1m0-08': '8', '2.4m Hiltner': 's'}
+plot_markers = {'1m0-06': 'h', '1m0-08': '8', '1.3m McGraw-Hill': '^', '2.4m Hiltner': 's'}
+saturation = 50000.
 
 
 def load_catalog(catalog_path):
@@ -92,13 +94,7 @@ def read_and_refine_wcs(filepath, catalog_coords, show=True):
     return ccddata
 
 
-def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None, bkg_box_size=1024, saturation=50000.,
-                       aperture_radius=2.*u.arcsec):
-    background = Background2D(ccddata, bkg_box_size)
-    ccddata.mask |= ccddata.data > saturation
-    ccddata.uncertainty = ccddata.data ** 0.5
-    ccddata.data -= background.background
-
+def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None, aperture_radius=2.*u.arcsec):
     apertures = SkyCircularAperture(catalog_coords, aperture_radius)
     photometry = aperture_photometry(ccddata, apertures)
     photometry['aperture_mag'] = u.Magnitude(photometry['aperture_sum'] / ccddata.meta['exptime'])
@@ -106,7 +102,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     photometry = hstack([catalog, photometry])
     photometry['zeropoint'] = photometry['catalog_mag'] - photometry['aperture_mag'].value
     zeropoints = photometry['zeropoint'][~target]
-    if photometry.masked:
+    if photometry.has_masked_values and photometry.mask['zeropoint'][~target].any():
         zeropoints = zeropoints.filled(np.nan)
     zp = np.nanmedian(zeropoints)
     zperr = mad_std(zeropoints, ignore_nan=True) / np.isfinite(zeropoints).sum() ** 0.5  # std error
@@ -115,7 +111,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
         f.write(f'{ccddata.meta["MJD-OBS"]:.5f} {mag:.3f} {dmag:.3f} {zp:.3f} {zperr:.3f} {ccddata.meta["FILTER"]:>6s} '
-                f'{ccddata.meta["TELESCOP"]:>12s}\n')
+                f'{ccddata.meta["TELESCOP"]:>16s}\n')
 
     if image_path is not None:
         ax = plt.axes()
@@ -153,15 +149,32 @@ if __name__ == '__main__':
     catalog0, catalog_coords0, target0 = load_catalog(ps1_catalog_path)
 
     for filename in os.listdir(data_dir):
+        if 'bkg' in filename or 'mask' in filename or 'var' in filename:
+            continue
         filepath = os.path.join(data_dir, filename)
         image_path = os.path.join(image_dir, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
 
         if 'elp' in filename:  # Las Cumbres image
             ccddata = read_and_refine_wcs(filepath, catalog_coords0)
-        else:  # MDM image
+            ccddata.mask |= ccddata.data > saturation
+            ccddata.uncertainty = ccddata.data ** 0.5
+            background = Background2D(ccddata, 1024)
+            ccddata.data -= background.background
+        elif '.flat.' in filename:  # MDM image processed by me
             ccddata = CCDData.read(filepath, unit='adu')
-            ccddata.mask = np.zeros_like(ccddata.data, bool)
+            ccddata.mask = fits.getdata(filepath.replace('.flat', '.mask'))
+            ccddata.uncertainty = fits.getdata(filepath.replace('.flat', '.var')) ** 0.5
+            ccddata.data -= fits.getdata(filepath.replace('.flat', '.bkg'))
+        else:  # other MDM image
+            ccddata = CCDData.read(filepath, unit='adu')
+            ccddata.mask = ccddata.data > saturation
+            ccddata.uncertainty = ccddata.data ** 0.5
+            background = Background2D(ccddata, 1016)
+            ccddata.data -= background.background
+
+        if 'MJD-OBS' not in ccddata.meta and 'MJD' in ccddata.meta:
             ccddata.meta['MJD-OBS'] = ccddata.meta['MJD']
+        if 'FILTER' not in ccddata.meta and 'FILTID2' in ccddata.meta:
             ccddata.meta['FILTER'] = ccddata.meta['FILTID2']
 
         if ccddata.meta['FILTER'][0] in 'grizy':  # use Pan-STARRS catalog
