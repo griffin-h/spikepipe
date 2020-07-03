@@ -12,13 +12,13 @@ import numpy as np
 from photutils import Background2D, SkyCircularAperture, SkyCircularAnnulus, aperture_photometry
 import os
 import logging
+import argparse
 
 logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
 
 target_coords = SkyCoord('19:18:45.580 +49:37:56.03', unit=(u.hourangle, u.deg))
 ps1_catalog_path = 'catalogs/spikey_catalog.csv'
 apass_catalog_path = 'catalogs/spikey_apass_catalog.csv'
-data_dir = 'data'
 image_dir = 'plots'
 lc_file = 'lc.txt'
 plot_colors = {'rp': 'r', 'V': 'g'}
@@ -163,16 +163,21 @@ def update_light_curve():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser('Reduce images of Spikey and extract photometry')
+    parser.add_argument('filenames', nargs='+', help='Filenames to process')
+    parser.add_argument('--astrometry', action='store_true', help='Use astrometry.net to solve WCS')
+    args = parser.parse_args()
+
     catalog0, catalog_coords0, target0 = load_catalog(ps1_catalog_path)
 
-    for filename in os.listdir(data_dir):
+    for filepath in args.filenames:
+        filename = os.path.basename(filepath)
         if 'bkg' in filename or 'mask' in filename or 'var' in filename:
             continue
-        filepath = os.path.join(data_dir, filename)
         image_path = os.path.join(image_dir, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
 
         if 'elp' in filename:  # Las Cumbres image
-            ccddata = read_and_refine_wcs(filepath, catalog_coords0)
+            ccddata = read_and_refine_wcs(filepath, catalog_coords0, use_astrometry_net=args.astrometry)
             ccddata.mask |= ccddata.data > saturation
             ccddata.uncertainty = ccddata.data ** 0.5
             background = Background2D(ccddata, 1024)
