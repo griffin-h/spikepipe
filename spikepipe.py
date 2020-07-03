@@ -92,11 +92,17 @@ def read_and_refine_wcs(filepath, catalog_coords, use_astrometry_net=False, show
     refine_wcs(ccddata.wcs, xy, radec)
 
     if show:
-        imshow_norm(ccddata.data, interval=ZScaleInterval())
+        plt.figure(figsize=(6., 6.))
+        imshow_norm(ccddata.data, interval=ZScaleInterval(),
+                    origin='lower' if ccddata.wcs.wcs.cd[1, 1] > 0. else 'upper')
+        plt.axis('off')
+        plt.axis('tight')
+        plt.tight_layout(pad=0.)
         x, y = ccddata.wcs.all_world2pix(radec, 0).T
         plt.plot(x, y, ls='none', marker='o', mec='r', mfc='none')
-        plt.savefig(os.path.join(image_dir, os.path.basename(filepath)[:-8] + '.pdf'), overwrite=True)
-        plt.savefig('latest_image.pdf', overwrite=True)
+        image_filename = os.path.basename(filepath).replace('.fz', '').replace('.fits', '.png')
+        plt.savefig(os.path.join(image_dir, image_filename), overwrite=True)
+        plt.savefig('latest_image.png', overwrite=True)
         plt.close()
 
     return ccddata

@@ -16,5 +16,5 @@ for frame in frames:
 if frames:
     update_light_curve()
     os.system('mailx -s "Spikey Observation {}" '.format(today) +
-              '-a latest_image.pdf -a latest_cal.pdf -a lc.pdf -a lc.txt ' +
+              '-a latest_image.png -a latest_cal.pdf -a lc.pdf -a lc.txt ' +
               os.environ['SPIKEYPPL'] + ' < /dev/null')
