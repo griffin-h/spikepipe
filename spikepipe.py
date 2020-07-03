@@ -69,7 +69,15 @@ def refine_wcs(wcs, xy, radec):
     update_wcs(wcs, res.x)
 
 
-def read_and_refine_wcs(filepath, catalog_coords, show=True):
+def read_and_refine_wcs(filepath, catalog_coords, use_astrometry_net=False, show=True):
+    if use_astrometry_net:
+        if filepath.endswith('.fz'):
+            os.system(f'funpack {filepath}')
+            filepath = filepath[:-3]
+        os.system(f'solve-field -p --temp-axy -S none -M none -R none -W none -B none -O -U indx.xyls {filepath}'
+                  ' && rm indx.xyls')
+        os.system(f'mv {filepath.replace(".fits", ".new")} {filepath}')
+
     ccddata = CCDData.read(filepath, unit='adu', hdu='SCI')
     sources = fits.getdata(filepath, extname='CAT')
     ccddata.mask = fits.getdata(filepath, extname='BPM')
