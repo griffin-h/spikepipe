@@ -11,6 +11,10 @@ for frame in frames:
     filename = download_frame(frame, 'data/')
     image_path = os.path.join(image_dir, os.path.basename(filename).replace('.fz', '').replace('.fits', '_cal.pdf'))
     ccddata = read_and_refine_wcs(filename, catalog_coords)
+    ccddata.mask |= ccddata.data > saturation
+    ccddata.uncertainty = ccddata.data ** 0.5
+    background = Background2D(ccddata, 1024)
+    ccddata.data -= background.background
     catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'][0] + 'MeanPSFMag']
     extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
 if frames:
