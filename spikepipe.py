@@ -13,6 +13,7 @@ from photutils import Background2D, SkyCircularAperture, SkyCircularAnnulus, ape
 import os
 import logging
 import argparse
+from glob import glob
 
 logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
 
@@ -21,8 +22,8 @@ ps1_catalog_path = 'catalogs/spikey_catalog.csv'
 apass_catalog_path = 'catalogs/spikey_apass_catalog.csv'
 image_dir = 'plots'
 lc_file = 'lc.txt'
-plot_colors = {'rp': 'r', 'V': 'g'}
-plot_markers = {'1m0-06': 'h', '1m0-08': '8', '1.3m McGraw-Hill': '^', '2.4m Hiltner': 's'}
+plot_colors = {'rp': 'r', 'r': 'r', 'V': 'g'}
+plot_markers = {'1m0-06': 'h', '1m0-08': '8', '1.3m McGraw-Hill': '^', '2.4m Hiltner': 's', 'FLWO 48"': 'D'}
 saturation = 50000.
 
 
@@ -114,6 +115,11 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     if bg_radius_in is not None and bg_radius_out is not None:
         apertures = [apertures, SkyCircularAnnulus(catalog_coords, bg_radius_in, bg_radius_out)]
     photometry = aperture_photometry(ccddata, apertures)
+    target_row = photometry[target][0]
+    if target_row['xcenter'] < 0. or target_row['xcenter'] > ccddata.shape[1] or \
+            target_row['ycenter'] < 0. or target_row['ycenter'] > ccddata.shape[0]:
+        logging.error('target not contained in the image (or coordinate solution is bad)')
+        return
     if 'aperture_sum_1' in photometry.colnames:
         flux = photometry['aperture_sum_0'] - photometry['aperture_sum_1']
         dflux = (photometry['aperture_sum_err_0'] ** 2. + photometry['aperture_sum_err_1'] ** 2.) ** 0.5
@@ -127,12 +133,11 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     zeropoints = photometry['zeropoint'][~target]
     zp = np.nanmedian(zeropoints)
     zperr = mad_std(zeropoints, ignore_nan=True) / np.isfinite(zeropoints).sum() ** 0.5  # std error
-    target_row = photometry[target][0]
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
         f.write(f'{ccddata.meta["MJD-OBS"]:.5f} {mag:.3f} {dmag:.3f} {zp:.3f} {zperr:.3f} {ccddata.meta["FILTER"]:>6s} '
-                f'{ccddata.meta["TELESCOP"]:>16s}\n')
+                f'{ccddata.meta["TELESCOP"]:>12s}\n')
 
     if image_path is not None:
         ax = plt.axes()
@@ -153,6 +158,11 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
 
 def update_light_curve():
     t = Table.read('lc.txt', format='ascii')
+    t.sort('MJD')
+    t['MJD'].format = '%.5f'
+    for key in ['mag', 'dmag', 'zp', 'dzp']:
+        t[key].format = '%.3f'
+    t.write('lc.txt', format='ascii.fixed_width_two_line', overwrite=True)
     grouped = t.group_by(['filter', 'telescope'])
     ax = plt.axes()
     for f in grouped.groups:
@@ -191,6 +201,35 @@ if __name__ == '__main__':
             ccddata.mask = fits.getdata(filepath.replace('.flat', '.mask'))
             ccddata.uncertainty = fits.getdata(filepath.replace('.flat', '.var')) ** 0.5
             ccddata.data -= fits.getdata(filepath.replace('.flat', '.bkg'))
+        elif 'KIC011606854' in filename:  # Keplercam image
+            if not filename.endswith('_2.fits'):
+                hdulist = fits.open(filepath)
+                filepath = filepath.replace('.fits', '_2.fits')
+                for key in ['CD1_1', 'CD1_2', 'CD2_1', 'CD2_2', 'CRPIX1', 'CRPIX2', 'CRVAL1', 'CRVAL2']:
+                    hdulist[0].header[key] = hdulist[2].header[key]
+                fits.writeto(filepath, hdulist[2].data, hdulist[0].header, output_verify='fix', overwrite=True)
+                os.system(f'solve-field -p --temp-axy -S none -M none -R none -W none -B none -O -U indx.xyls {filepath}'
+                          ' && rm indx.xyls')
+                os.system(f'mv {filepath.replace(".fits", ".new")} {filepath}')
+            ccddata = CCDData.read(filepath, unit='adu')
+            ccddata.mask = ccddata.data > saturation
+            ccddata.uncertainty = ccddata.data ** 0.5
+            date = int(ccddata.header['DATE-OBS'][:10].replace('-', '')) - 1
+            bias_files = glob(f'data/kepcam/bias.{date:d}/*BIAS.fits')
+            biases = []
+            for bias_file in bias_files:
+                biases.append(fits.getdata(bias_file, extension=2))
+            bias = np.mean(biases, axis=0)
+            ccddata.data = ccddata.data - bias
+            flat_files = glob(f'data/kepcam/flat.{date:d}/*FLATr.fits')
+            flats = []
+            for flat_file in flat_files:
+                flats.append(fits.getdata(flat_file, extension=2))
+            flat = np.mean(flats, axis=0) - bias
+            ccddata.data *= flat.mean() / flat
+            background = Background2D(ccddata, 32)
+            ccddata.data -= background.background
+            ccddata.header['TELESCOP'] = 'FLWO 48"'
         else:  # other MDM image
             ccddata = CCDData.read(filepath, unit='adu')
             ccddata.mask = ccddata.data > saturation
