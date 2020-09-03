@@ -116,8 +116,8 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
         apertures = [apertures, SkyCircularAnnulus(catalog_coords, bg_radius_in, bg_radius_out)]
     photometry = aperture_photometry(ccddata, apertures)
     target_row = photometry[target][0]
-    if target_row['xcenter'] < 0. or target_row['xcenter'] > ccddata.shape[1] or \
-            target_row['ycenter'] < 0. or target_row['ycenter'] > ccddata.shape[0]:
+    if target_row['xcenter'].value < 0. or target_row['xcenter'].value > ccddata.shape[1] or \
+            target_row['ycenter'].value < 0. or target_row['ycenter'].value > ccddata.shape[0]:
         logging.error('target not contained in the image (or coordinate solution is bad)')
         return
     if 'aperture_sum_1' in photometry.colnames:
