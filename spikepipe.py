@@ -133,6 +133,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     zeropoints = photometry['zeropoint'][~target]
     zp = np.nanmedian(zeropoints)
     zperr = mad_std(zeropoints, ignore_nan=True) / np.isfinite(zeropoints).sum() ** 0.5  # std error
+    target_row = photometry[target][0]
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
