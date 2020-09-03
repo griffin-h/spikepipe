@@ -137,7 +137,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
-        f.write(f'{ccddata.meta["MJD-OBS"]:.5f} {mag:.3f} {dmag:.3f} {zp:.3f} {zperr:.3f} {ccddata.meta["FILTER"]:>6s} '
+        f.write(f'{ccddata.meta["MJD-OBS"]:11.5f} {mag:6.3f} {dmag:5.3f} {zp:6.3f} {zperr:5.3f} {ccddata.meta["FILTER"]:>6s} '
                 f'{ccddata.meta["TELESCOP"]:>12s}\n')
 
     if image_path is not None:
@@ -160,9 +160,11 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
 def update_light_curve():
     t = Table.read('lc.txt', format='ascii')
     t.sort('MJD')
-    t['MJD'].format = '%.5f'
-    for key in ['mag', 'dmag', 'zp', 'dzp']:
-        t[key].format = '%.3f'
+    t['MJD'].format = '%11.5f'
+    for key in ['mag', 'zp']:
+        t[key].format = '%6.3f'
+    for key in ['dmag', 'dzp']:
+        t[key].format = '%5.3f'
     t.write('lc.txt', format='ascii.fixed_width_two_line', overwrite=True)
     grouped = t.group_by(['filter', 'telescope'])
     ax = plt.axes()
