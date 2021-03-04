@@ -246,6 +246,8 @@ if __name__ == '__main__':
 
         if 'MJD-OBS' not in ccddata.meta and 'MJD' in ccddata.meta:
             ccddata.meta['MJD-OBS'] = ccddata.meta['MJD']
+        elif 'JD' in ccddata.meta:
+            ccddata.meta['MJD-OBS'] = ccddata.meta['JD'] - 2400000.5
         if 'FILTER' not in ccddata.meta and 'FILTID2' in ccddata.meta:
             ccddata.meta['FILTER'] = ccddata.meta['FILTID2']
 
