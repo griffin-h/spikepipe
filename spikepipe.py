@@ -34,9 +34,9 @@ def load_catalog(catalog_path):
     catalog_coords = SkyCoord(ras, decs, unit=u.deg)
     target = catalog_coords.separation(target_coords).arcsec < 1.
     if target.sum() == 0:
-        ras = np.append(catalog_coords.ra, target_coords.ra)
-        decs = np.append(catalog_coords.dec, target_coords.dec)
-        catalog_coords = SkyCoord(ras, decs)
+        ras = np.append(catalog_coords.ra.deg, target_coords.ra.deg)
+        decs = np.append(catalog_coords.dec.deg, target_coords.dec.deg)
+        catalog_coords = SkyCoord(ras, decs, unit=u.deg)
         target = np.append(target, True)
     elif target.sum() > 1:
         logging.warning('catalog has multiple sources within 1" of the target')
