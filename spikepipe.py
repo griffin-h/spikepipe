@@ -185,6 +185,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Reduce images of Spikey and extract photometry')
     parser.add_argument('filenames', nargs='+', help='Filenames to process')
     parser.add_argument('--astrometry', action='store_true', help='Use astrometry.net to solve WCS')
+    parser.add_argument('--transform', action='store_true', help='Calibrate V-band to transformed PS1 g- and r-band')
     args = parser.parse_args()
 
     catalog0, catalog_coords0, target0 = load_catalog(ps1_catalog_path)
@@ -251,6 +252,9 @@ if __name__ == '__main__':
         if ccddata.meta['FILTER'][0] in 'grizy':  # use Pan-STARRS catalog
             catalog, catalog_coords, target = catalog0.copy(), catalog_coords0, target0
             catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'][0] + 'MeanPSFMag']
+        elif ccddata.meta['FILTER'][0] == 'V' and args.transform:
+            catalog, catalog_coords, target = catalog0.copy(), catalog_coords0, target0
+            catalog['catalog_mag'] = (1 - 0.5784) * catalog['gMeanPSFMag'] + 0.5784 * catalog['rMeanPSFMag'] - 0.0038
         elif ccddata.meta['FILTER'][0] in 'BV':  # use APASS catalog
             catalog, catalog_coords, target = load_catalog(apass_catalog_path)
             catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'].replace('p', '_') + 'mag']
