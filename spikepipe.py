@@ -138,7 +138,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
     with open(lc_file, 'a') as f:
         f.write(f'{ccddata.meta["MJD-OBS"]:11.5f} {mag:6.3f} {dmag:5.3f} {zp:6.3f} {zperr:5.3f} {ccddata.meta["FILTER"]:>6s} '
-                f'{ccddata.meta["TELESCOP"]:>12s}\n')
+                f'{ccddata.meta["TELESCOP"]:>16s} {ccddata.meta["filename"]:>22s}\n')
 
     if image_path is not None:
         ax = plt.axes()
@@ -165,6 +165,8 @@ def update_light_curve():
         t[key].format = '%6.3f'
     for key in ['dmag', 'dzp']:
         t[key].format = '%5.3f'
+    t['telescope'].format = '%16s'
+    t['filename'].format = '%22s'
     t.write('lc.txt', format='ascii.fixed_width_two_line', overwrite=True)
     grouped = t.group_by(['filter', 'telescope'])
     ax = plt.axes()
@@ -239,6 +241,7 @@ if __name__ == '__main__':
             ccddata.uncertainty = ccddata.data ** 0.5
             background = Background2D(ccddata, 1016)
             ccddata.data -= background.background
+        ccddata.meta['filename'] = filename
 
         if 'MJD-OBS' not in ccddata.meta and 'MJD' in ccddata.meta:
             ccddata.meta['MJD-OBS'] = ccddata.meta['MJD']
