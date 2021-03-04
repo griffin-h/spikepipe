@@ -130,7 +130,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     photometry['aperture_mag_err'] = 2.5 / np.log(10.) * dflux / flux
     photometry = hstack([catalog, photometry])
     photometry['zeropoint'] = photometry['catalog_mag'] - photometry['aperture_mag'].value
-    zeropoints = photometry['zeropoint'][~target]
+    zeropoints = photometry['zeropoint'][~target].filled(np.nan)
     zp = np.nanmedian(zeropoints)
     zperr = mad_std(zeropoints, ignore_nan=True) / np.isfinite(zeropoints).sum() ** 0.5  # std error
     target_row = photometry[target][0]
