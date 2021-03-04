@@ -70,7 +70,7 @@ def refine_wcs(wcs, xy, radec):
     update_wcs(wcs, res.x)
 
 
-def read_and_refine_wcs(filepath, catalog_coords, use_astrometry_net=False, show=True):
+def read_and_refine_wcs(filepath, catalog_coords, use_astrometry_net=False, show=False):
     if use_astrometry_net:
         if filepath.endswith('.fz'):
             os.system(f'funpack {filepath}')
@@ -154,6 +154,21 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
         ax.legend()
         plt.savefig(image_path, overwrite=True)
         plt.savefig('latest_cal.pdf', overwrite=True)
+        plt.close()
+
+        plt.figure(figsize=(6., 6.))
+        imshow_norm(ccddata.data, interval=ZScaleInterval())
+        plt.axis('off')
+        plt.axis('tight')
+        plt.tight_layout(pad=0.)
+        if isinstance(apertures, list):
+            for aperture in apertures:
+                aperture.to_pixel(ccddata.wcs).plot(color='r', lw=1)
+        else:
+            apertures.to_pixel(ccddata.wcs).plot(color='r', lw=1)
+        image_filename = ccddata.meta['filename'].replace('.fz', '').replace('.fits', '.png')
+        plt.savefig(os.path.join(image_dir, image_filename), overwrite=True)
+        plt.savefig('latest_image.png', overwrite=True)
         plt.close()
 
 
