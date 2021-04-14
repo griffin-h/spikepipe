@@ -70,14 +70,18 @@ def refine_wcs(wcs, xy, radec):
     update_wcs(wcs, res.x)
 
 
-def read_and_refine_wcs(filepath, catalog_coords, use_astrometry_net=False, show=False):
+def run_astrometry_net(filepath):
+    os.system(f'solve-field -p --temp-axy -S none -M none -R none -W none -B none -O -U indx.xyls {filepath}'
+              ' && rm indx.xyls')
+    os.system(f'mv {filepath.replace(".fits", ".new")} {filepath}')
+
+
+def preprocess_lco_image(filepath, catalog_coords, use_astrometry_net=False):
     if use_astrometry_net:
         if filepath.endswith('.fz'):
             os.system(f'funpack {filepath}')
             filepath = filepath[:-3]
-        os.system(f'solve-field -p --temp-axy -S none -M none -R none -W none -B none -O -U indx.xyls {filepath}'
-                  ' && rm indx.xyls')
-        os.system(f'mv {filepath.replace(".fits", ".new")} {filepath}')
+        run_astrometry_net(filepath)
 
     ccddata = CCDData.read(filepath, unit='adu', hdu='SCI')
     sources = fits.getdata(filepath, extname='CAT')
@@ -92,20 +96,59 @@ def read_and_refine_wcs(filepath, catalog_coords, use_astrometry_net=False, show
     radec = np.array([catalog_coords.ra.deg[i[match]], catalog_coords.dec.deg[i[match]]]).T
     refine_wcs(ccddata.wcs, xy, radec)
 
-    if show:
-        plt.figure(figsize=(6., 6.))
-        imshow_norm(ccddata.data, interval=ZScaleInterval(),
-                    origin='lower' if ccddata.wcs.wcs.cd[1, 1] > 0. else 'upper')
-        plt.axis('off')
-        plt.axis('tight')
-        plt.tight_layout(pad=0.)
-        x, y = ccddata.wcs.all_world2pix(radec, 0).T
-        plt.plot(x, y, ls='none', marker='o', mec='r', mfc='none')
-        image_filename = os.path.basename(filepath).replace('.fz', '').replace('.fits', '.png')
-        plt.savefig(os.path.join(image_dir, image_filename), overwrite=True)
-        plt.savefig('latest_image.png', overwrite=True)
-        plt.close()
+    ccddata.mask |= ccddata.data > saturation
+    ccddata.uncertainty = ccddata.data ** 0.5
+    background = Background2D(ccddata, 1024)
+    ccddata.data -= background.background
+    return ccddata
 
+
+def preprocess_mdm_image(filepath):
+    ccddata = CCDData.read(filepath, unit='adu')
+    if '.flat.' in filename:  # MDM image processed by me
+        ccddata.mask = fits.getdata(filepath.replace('.flat', '.mask'))
+        ccddata.uncertainty = fits.getdata(filepath.replace('.flat', '.var')) ** 0.5
+        ccddata.data -= fits.getdata(filepath.replace('.flat', '.bkg'))
+    else:
+        ccddata.mask = ccddata.data > saturation
+        ccddata.uncertainty = ccddata.data ** 0.5
+        background = Background2D(ccddata, 1016)
+        ccddata.data -= background.background
+    ccddata.meta['MJD-OBS'] = ccddata.meta['JD'] - 2400000.5
+    if 'FILTER' not in ccddata.meta and 'FILTID2' in ccddata.meta:
+        ccddata.meta['FILTER'] = ccddata.meta['FILTID2']
+    return ccddata
+
+
+def preprocess_flwo_image(filepath):
+    if not filename.endswith('_2.fits'):
+        hdulist = fits.open(filepath)
+        filepath = filepath.replace('.fits', '_2.fits')
+        for key in ['CD1_1', 'CD1_2', 'CD2_1', 'CD2_2', 'CRPIX1', 'CRPIX2', 'CRVAL1', 'CRVAL2']:
+            hdulist[0].header[key] = hdulist[2].header[key]
+        fits.writeto(filepath, hdulist[2].data, hdulist[0].header, output_verify='fix', overwrite=True)
+        run_astrometry_net(filepath)
+
+    ccddata = CCDData.read(filepath, unit='adu')
+    ccddata.mask = ccddata.data > saturation
+    ccddata.uncertainty = ccddata.data ** 0.5
+    date = int(ccddata.header['DATE-OBS'][:10].replace('-', '')) - 1
+    bias_files = glob(f'data/kepcam/bias.{date:d}/*BIAS.fits')
+    biases = []
+    for bias_file in bias_files:
+        biases.append(fits.getdata(bias_file, extension=2))
+    bias = np.mean(biases, axis=0)
+    ccddata.data = ccddata.data - bias
+    flat_files = glob(f'data/kepcam/flat.{date:d}/*FLATr.fits')
+    flats = []
+    for flat_file in flat_files:
+        flats.append(fits.getdata(flat_file, extension=2))
+    flat = np.mean(flats, axis=0) - bias
+    ccddata.data *= flat.mean() / flat
+    background = Background2D(ccddata, 32)
+    ccddata.data -= background.background
+    ccddata.header['TELESCOP'] = 'FLWO 48"'
+    ccddata.header['MJD-OBS'] = ccddata.header['MJD']
     return ccddata
 
 
@@ -157,7 +200,8 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
         plt.close()
 
         plt.figure(figsize=(6., 6.))
-        imshow_norm(ccddata.data, interval=ZScaleInterval())
+        imshow_norm(ccddata.data, interval=ZScaleInterval(),
+                    origin='lower' if ccddata.wcs.wcs.cd[1, 1] > 0. else 'upper')
         plt.axis('off')
         plt.axis('tight')
         plt.tight_layout(pad=0.)
@@ -212,59 +256,12 @@ if __name__ == '__main__':
         image_path = os.path.join(image_dir, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
 
         if 'elp' in filename:  # Las Cumbres image
-            ccddata = read_and_refine_wcs(filepath, catalog_coords0, use_astrometry_net=args.astrometry)
-            ccddata.mask |= ccddata.data > saturation
-            ccddata.uncertainty = ccddata.data ** 0.5
-            background = Background2D(ccddata, 1024)
-            ccddata.data -= background.background
-        elif '.flat.' in filename:  # MDM image processed by me
-            ccddata = CCDData.read(filepath, unit='adu')
-            ccddata.mask = fits.getdata(filepath.replace('.flat', '.mask'))
-            ccddata.uncertainty = fits.getdata(filepath.replace('.flat', '.var')) ** 0.5
-            ccddata.data -= fits.getdata(filepath.replace('.flat', '.bkg'))
+            ccddata = preprocess_lco_image(filepath, catalog_coords0, use_astrometry_net=args.astrometry)
         elif 'KIC011606854' in filename:  # Keplercam image
-            if not filename.endswith('_2.fits'):
-                hdulist = fits.open(filepath)
-                filepath = filepath.replace('.fits', '_2.fits')
-                for key in ['CD1_1', 'CD1_2', 'CD2_1', 'CD2_2', 'CRPIX1', 'CRPIX2', 'CRVAL1', 'CRVAL2']:
-                    hdulist[0].header[key] = hdulist[2].header[key]
-                fits.writeto(filepath, hdulist[2].data, hdulist[0].header, output_verify='fix', overwrite=True)
-                os.system(f'solve-field -p --temp-axy -S none -M none -R none -W none -B none -O -U indx.xyls {filepath}'
-                          ' && rm indx.xyls')
-                os.system(f'mv {filepath.replace(".fits", ".new")} {filepath}')
-            ccddata = CCDData.read(filepath, unit='adu')
-            ccddata.mask = ccddata.data > saturation
-            ccddata.uncertainty = ccddata.data ** 0.5
-            date = int(ccddata.header['DATE-OBS'][:10].replace('-', '')) - 1
-            bias_files = glob(f'data/kepcam/bias.{date:d}/*BIAS.fits')
-            biases = []
-            for bias_file in bias_files:
-                biases.append(fits.getdata(bias_file, extension=2))
-            bias = np.mean(biases, axis=0)
-            ccddata.data = ccddata.data - bias
-            flat_files = glob(f'data/kepcam/flat.{date:d}/*FLATr.fits')
-            flats = []
-            for flat_file in flat_files:
-                flats.append(fits.getdata(flat_file, extension=2))
-            flat = np.mean(flats, axis=0) - bias
-            ccddata.data *= flat.mean() / flat
-            background = Background2D(ccddata, 32)
-            ccddata.data -= background.background
-            ccddata.header['TELESCOP'] = 'FLWO 48"'
-        else:  # other MDM image
-            ccddata = CCDData.read(filepath, unit='adu')
-            ccddata.mask = ccddata.data > saturation
-            ccddata.uncertainty = ccddata.data ** 0.5
-            background = Background2D(ccddata, 1016)
-            ccddata.data -= background.background
+            ccddata = preprocess_flwo_image(filepath)
+        else:  # MDM image
+            ccddata = preprocess_mdm_image(filepath)
         ccddata.meta['filename'] = filename
-
-        if 'MJD-OBS' not in ccddata.meta and 'MJD' in ccddata.meta:
-            ccddata.meta['MJD-OBS'] = ccddata.meta['MJD']
-        elif 'JD' in ccddata.meta:
-            ccddata.meta['MJD-OBS'] = ccddata.meta['JD'] - 2400000.5
-        if 'FILTER' not in ccddata.meta and 'FILTID2' in ccddata.meta:
-            ccddata.meta['FILTER'] = ccddata.meta['FILTID2']
 
         if ccddata.meta['FILTER'][0] in 'grizy':  # use Pan-STARRS catalog
             catalog, catalog_coords, target = catalog0.copy(), catalog_coords0, target0
