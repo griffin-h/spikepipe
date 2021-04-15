@@ -180,10 +180,8 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, plot_path=None,
     target_row = photometry[target][0]
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
-    results = {
-        'MJD': ccddata.meta['MJD-OBS'], 'mag': mag, 'dmag': dmag, 'zp': zp, 'zperr': zperr,
-        'filter': ccddata.meta['FILTER'], 'telescope': ccddata.meta['TELESCOP'], 'filename': ccddata.meta['filename']
-    }
+    results = {'MJD': ccddata.meta['MJD-OBS'], 'mag': mag, 'dmag': dmag, 'zp': zp, 'zperr': zperr,
+               'filter': ccddata.meta['FILTER'], 'telescope': ccddata.meta['TELESCOP']}
 
     if plot_path is not None:
         ax = plt.axes()
@@ -268,7 +266,6 @@ if __name__ == '__main__':
             ccddata = preprocess_flwo_image(filepath)
         else:  # MDM image
             ccddata = preprocess_mdm_image(filepath)
-        ccddata.meta['filename'] = filename
 
         if ccddata.meta['FILTER'][0] in 'grizy':  # use Pan-STARRS catalog
             catalog, catalog_coords, target = catalog0.copy(), catalog_coords0, target0
@@ -284,5 +281,5 @@ if __name__ == '__main__':
 
         results = extract_photometry(ccddata, catalog, catalog_coords, target,
                                      plot_path=plot_path, image_path=image_path)
-
+        results['filename'] = filename
         update_light_curve(LC_FILE, results)

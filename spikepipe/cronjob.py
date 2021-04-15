@@ -15,6 +15,7 @@ for frame in frames:
     ccddata = preprocess_lco_image(filepath, catalog_coords, use_astrometry_net=True)
     catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'][0] + 'MeanPSFMag']
     results = extract_photometry(ccddata, catalog, catalog_coords, target, plot_path=plot_path, image_path=image_path)
+    results['filename'] = filename
     update_light_curve(LC_FILE, results)
 if frames:
     email_cmd = 'mailx -s "Spikey Observation {}" -a latest_image.png -a latest_cal.pdf -a {} -a {} {} < /dev/null'
