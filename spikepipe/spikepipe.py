@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, hstack
+from astropy.table import Table, hstack, MaskedColumn
 from astropy.nddata import CCDData
 from astropy.stats import mad_std
 from astropy.io import fits
@@ -174,7 +174,9 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, plot_path=None,
     photometry['aperture_mag_err'] = 2.5 / np.log(10.) * dflux / flux
     photometry = hstack([catalog, photometry])
     photometry['zeropoint'] = photometry['catalog_mag'] - photometry['aperture_mag'].value
-    zeropoints = photometry['zeropoint'][~target].filled(np.nan)
+    zeropoints = photometry['zeropoint'][~target]
+    if isinstance(zeropoints, MaskedColumn):
+        zeropoints = zeropoints.filled(np.nan)
     zp = np.nanmedian(zeropoints)
     zperr = mad_std(zeropoints, ignore_nan=True) / np.isfinite(zeropoints).sum() ** 0.5  # std error
     target_row = photometry[target][0]
