@@ -99,7 +99,7 @@ def preprocess_lco_image(filepath, catalog_coords, use_astrometry_net=False, sat
 
     ccddata.mask |= ccddata.data > saturation
     ccddata.uncertainty = ccddata.data ** 0.5
-    background = Background2D(ccddata, 1024)
+    background = Background2D(ccddata.data, 1024)
     ccddata.data -= background.background
     return ccddata
 
@@ -113,7 +113,7 @@ def preprocess_mdm_image(filepath, saturation=50000.):
     else:
         ccddata.mask = ccddata.data > saturation
         ccddata.uncertainty = ccddata.data ** 0.5
-        background = Background2D(ccddata, 1016)
+        background = Background2D(ccddata.data, 1016)
         ccddata.data -= background.background
     ccddata.meta['MJD-OBS'] = ccddata.meta['JD'] - 2400000.5
     if 'FILTER' not in ccddata.meta and 'FILTID2' in ccddata.meta:
@@ -146,7 +146,7 @@ def preprocess_flwo_image(filepath, saturation=50000.):
         flats.append(fits.getdata(flat_file, extension=2))
     flat = np.mean(flats, axis=0) - bias
     ccddata.data *= flat.mean() / flat
-    background = Background2D(ccddata, 32)
+    background = Background2D(ccddata.data, 32)
     ccddata.data -= background.background
     ccddata.header['TELESCOP'] = 'FLWO 48"'
     ccddata.header['MJD-OBS'] = ccddata.header['MJD']
