@@ -12,9 +12,9 @@ for frame in frames:
     image_path = os.path.join(image_dir, os.path.basename(filename).replace('.fz', '').replace('.fits', '_cal.pdf'))
     ccddata = preprocess_lco_image(filename, catalog_coords, use_astrometry_net=True)
     catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'][0] + 'MeanPSFMag']
-    extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
+    results = extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
+    update_light_curve(results)
 if frames:
-    update_light_curve()
     os.system('mailx -s "Spikey Observation {}" '.format(today) +
               '-a latest_image.png -a latest_cal.pdf -a lc.pdf -a lc.txt ' +
               os.environ['SPIKEYPPL'] + ' < /dev/null')

@@ -179,9 +179,10 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
     target_row = photometry[target][0]
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
-    with open(lc_file, 'a') as f:
-        f.write(f'{ccddata.meta["MJD-OBS"]:11.5f} {mag:6.3f} {dmag:5.3f} {zp:6.3f} {zperr:5.3f} {ccddata.meta["FILTER"]:>6s} '
-                f'{ccddata.meta["TELESCOP"]:>16s} {ccddata.meta["filename"]:>22s}\n')
+    results = {
+        'MJD': ccddata.meta['MJD-OBS'], 'mag': mag, 'dmag': dmag, 'zp': zp, 'zperr': zperr,
+        'filter': ccddata.meta['FILTER'], 'telescope': ccddata.meta['TELESCOP'], 'filename': ccddata.meta['filename']
+    }
 
     if image_path is not None:
         ax = plt.axes()
@@ -215,9 +216,13 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
         plt.savefig('latest_image.png', overwrite=True)
         plt.close()
 
+    return results
 
-def update_light_curve():
+
+def update_light_curve(results=None):
     t = Table.read('lc.txt', format='ascii')
+    if results is not None:
+        t.add_row(results)
     t.sort('MJD')
     t['MJD'].format = '%11.5f'
     for key in ['mag', 'zp']:
@@ -275,6 +280,6 @@ if __name__ == '__main__':
         else:
             raise ValueError('no catalog for filter ' + ccddata.meta['FILTER'])
 
-        extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
+        results = extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
 
-    update_light_curve()
+        update_light_curve(results)
