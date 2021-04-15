@@ -14,20 +14,21 @@ import os
 import logging
 import argparse
 from glob import glob
+from pkg_resources import resource_filename
 
 logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
 
-target_coords = SkyCoord('19:18:45.580 +49:37:56.03', unit=(u.hourangle, u.deg))
-ps1_catalog_path = 'catalogs/spikey_catalog.csv'
-apass_catalog_path = 'catalogs/spikey_apass_catalog.csv'
-image_dir = 'plots'
-lc_file = 'lc.txt'
-plot_colors = {'rp': 'r', 'r': 'r', 'V': 'g'}
-plot_markers = {'1m0-06': 'h', '1m0-08': '8', '1.3m McGraw-Hill': '^', '2.4m Hiltner': 's', 'FLWO 48"': 'D'}
-saturation = 50000.
+TARGET_COORDS = SkyCoord('19:18:45.580 +49:37:56.03', unit=(u.hourangle, u.deg))
+PROPID = 'DDT2020A-006'
+PS1_CATALOG_PATH = resource_filename('spikepipe', 'catalogs/spikey_catalog.csv')
+APASS_CATALOG_PATH = resource_filename('spikepipe', 'catalogs/spikey_apass_catalog.csv')
+IMAGE_DIR = 'plots'
+LC_FILE = 'lc.txt'  # PDF always has the same basename
+PLOT_COLORS = {'rp': 'r', 'r': 'r', 'V': 'g'}
+PLOT_MARKERS = {'1m0-06': 'h', '1m0-08': '8', '1.3m McGraw-Hill': '^', '2.4m Hiltner': 's', 'FLWO 48"': 'D'}
 
 
-def load_catalog(catalog_path):
+def load_catalog(catalog_path, target_coords):
     catalog = Table.read(catalog_path, format='ascii.csv', fill_values=[('-999.0', '0'), ('', '0')])
     ras = catalog['raMean'] if 'raMean' in catalog.colnames else catalog['RAJ2000']
     decs = catalog['decMean'] if 'decMean' in catalog.colnames else catalog['DEJ2000']
@@ -76,7 +77,7 @@ def run_astrometry_net(filepath):
     os.system(f'mv {filepath.replace(".fits", ".new")} {filepath}')
 
 
-def preprocess_lco_image(filepath, catalog_coords, use_astrometry_net=False):
+def preprocess_lco_image(filepath, catalog_coords, use_astrometry_net=False, saturation=50000.):
     if use_astrometry_net:
         if filepath.endswith('.fz'):
             os.system(f'funpack {filepath}')
@@ -103,7 +104,7 @@ def preprocess_lco_image(filepath, catalog_coords, use_astrometry_net=False):
     return ccddata
 
 
-def preprocess_mdm_image(filepath):
+def preprocess_mdm_image(filepath, saturation=50000.):
     ccddata = CCDData.read(filepath, unit='adu')
     if '.flat.' in filename:  # MDM image processed by me
         ccddata.mask = fits.getdata(filepath.replace('.flat', '.mask'))
@@ -120,7 +121,7 @@ def preprocess_mdm_image(filepath):
     return ccddata
 
 
-def preprocess_flwo_image(filepath):
+def preprocess_flwo_image(filepath, saturation=50000.):
     if not filename.endswith('_2.fits'):
         hdulist = fits.open(filepath)
         filepath = filepath.replace('.fits', '_2.fits')
@@ -152,8 +153,8 @@ def preprocess_flwo_image(filepath):
     return ccddata
 
 
-def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None, aperture_radius=2.*u.arcsec,
-                       bg_radius_in=None, bg_radius_out=None):
+def extract_photometry(ccddata, catalog, catalog_coords, target, plot_path=None, image_path=None,
+                       aperture_radius=2.*u.arcsec, bg_radius_in=None, bg_radius_out=None):
     apertures = SkyCircularAperture(catalog_coords, aperture_radius)
     if bg_radius_in is not None and bg_radius_out is not None:
         apertures = [apertures, SkyCircularAnnulus(catalog_coords, bg_radius_in, bg_radius_out)]
@@ -184,7 +185,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
         'filter': ccddata.meta['FILTER'], 'telescope': ccddata.meta['TELESCOP'], 'filename': ccddata.meta['filename']
     }
 
-    if image_path is not None:
+    if plot_path is not None:
         ax = plt.axes()
         mark = ',' if np.isfinite(photometry['aperture_mag']).sum() > 1000 else '.'
         ax.plot(photometry['aperture_mag'], photometry['catalog_mag'], ls='none', marker=mark, zorder=1,
@@ -196,10 +197,11 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
         ax.set_xlabel('Instrumental Magnitude')
         ax.set_ylabel('AB Magnitude')
         ax.legend()
-        plt.savefig(image_path, overwrite=True)
+        plt.savefig(plot_path, overwrite=True)
         plt.savefig('latest_cal.pdf', overwrite=True)
         plt.close()
 
+    if image_path is not None:
         plt.figure(figsize=(6., 6.))
         imshow_norm(ccddata.data, interval=ZScaleInterval(),
                     origin='lower' if ccddata.wcs.wcs.cd[1, 1] > 0. else 'upper')
@@ -211,16 +213,15 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, image_path=None
                 aperture.to_pixel(ccddata.wcs).plot(color='r', lw=1)
         else:
             apertures.to_pixel(ccddata.wcs).plot(color='r', lw=1)
-        image_filename = ccddata.meta['filename'].replace('.fz', '').replace('.fits', '.png')
-        plt.savefig(os.path.join(image_dir, image_filename), overwrite=True)
+        plt.savefig(image_path, overwrite=True)
         plt.savefig('latest_image.png', overwrite=True)
         plt.close()
 
     return results
 
 
-def update_light_curve(results=None):
-    t = Table.read('lc.txt', format='ascii')
+def update_light_curve(lc_file, results=None):
+    t = Table.read(lc_file, format='ascii')
     if results is not None:
         t.add_row(results)
     t.sort('MJD')
@@ -231,17 +232,17 @@ def update_light_curve(results=None):
         t[key].format = '%5.3f'
     t['telescope'].format = '%16s'
     t['filename'].format = '%22s'
-    t.write('lc.txt', format='ascii.fixed_width_two_line', overwrite=True)
+    t.write(lc_file, format='ascii.fixed_width_two_line', overwrite=True)
     grouped = t.group_by(['filter', 'telescope'])
     ax = plt.axes()
     for f in grouped.groups:
         ax.errorbar(f['MJD'], f['mag'], f['dmag'], ls='none', label=f['telescope'][0] + ' ' + f['filter'][0],
-                    color=plot_colors.get(f['filter'][0]), marker=plot_markers.get(f['telescope'][0]))
+                    color=PLOT_COLORS.get(f['filter'][0]), marker=PLOT_MARKERS.get(f['telescope'][0]))
     ax.set_xlabel('MJD')
     ax.set_ylabel('Magnitude')
     ax.invert_yaxis()
     ax.legend(loc='best')
-    plt.savefig('lc.pdf', overwrite=True)
+    plt.savefig(lc_file.replace('.txt', '.pdf'), overwrite=True)
     plt.close()
 
 
@@ -252,13 +253,14 @@ if __name__ == '__main__':
     parser.add_argument('--transform', action='store_true', help='Calibrate V-band to transformed PS1 g- and r-band')
     args = parser.parse_args()
 
-    catalog0, catalog_coords0, target0 = load_catalog(ps1_catalog_path)
+    catalog0, catalog_coords0, target0 = load_catalog(PS1_CATALOG_PATH, TARGET_COORDS)
 
     for filepath in args.filenames:
         filename = os.path.basename(filepath)
         if 'bkg' in filename or 'mask' in filename or 'var' in filename:
             continue
-        image_path = os.path.join(image_dir, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
+        plot_path = os.path.join(IMAGE_DIR, filename.replace('.fz', '').replace('.fits', '.png'))
+        image_path = os.path.join(IMAGE_DIR, filename.replace('.fz', '').replace('.fits', '_cal.pdf'))
 
         if 'elp' in filename:  # Las Cumbres image
             ccddata = preprocess_lco_image(filepath, catalog_coords0, use_astrometry_net=args.astrometry)
@@ -275,11 +277,12 @@ if __name__ == '__main__':
             catalog, catalog_coords, target = catalog0.copy(), catalog_coords0, target0
             catalog['catalog_mag'] = (1 - 0.5784) * catalog['gMeanPSFMag'] + 0.5784 * catalog['rMeanPSFMag'] - 0.0038
         elif ccddata.meta['FILTER'][0] in 'BV':  # use APASS catalog
-            catalog, catalog_coords, target = load_catalog(apass_catalog_path)
+            catalog, catalog_coords, target = load_catalog(APASS_CATALOG_PATH, TARGET_COORDS)
             catalog['catalog_mag'] = catalog[ccddata.meta['FILTER'].replace('p', '_') + 'mag']
         else:
             raise ValueError('no catalog for filter ' + ccddata.meta['FILTER'])
 
-        results = extract_photometry(ccddata, catalog, catalog_coords, target, image_path=image_path)
+        results = extract_photometry(ccddata, catalog, catalog_coords, target,
+                                     plot_path=plot_path, image_path=image_path)
 
-        update_light_curve(results)
+        update_light_curve(LC_FILE, results)
