@@ -182,7 +182,7 @@ def extract_photometry(ccddata, catalog, catalog_coords, target, plot_path=None,
     target_row = photometry[target][0]
     mag = target_row['aperture_mag'].value + zp
     dmag = (target_row['aperture_mag_err'].value ** 2. + zperr ** 2.) ** 0.5
-    results = {'MJD': ccddata.meta['MJD-OBS'], 'mag': mag, 'dmag': dmag, 'zp': zp, 'zperr': zperr,
+    results = {'MJD': ccddata.meta['MJD-OBS'], 'mag': mag, 'dmag': dmag, 'zp': zp, 'dzp': zperr,
                'filter': ccddata.meta['FILTER'], 'telescope': ccddata.meta['TELESCOP']}
 
     if plot_path is not None:
